@@ -111,7 +111,7 @@ function App() {
   }, [])
 
   const getStatusColor = (status) => {
-    return status === 'healthy' ? '#10b981' : '#ef4444'
+    return status === 'healthy' ? '#34c759' : '#ff3b30'
   }
 
   const getStatusIcon = (status) => {
