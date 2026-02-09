@@ -402,6 +402,12 @@ function App() {
     unhealthy: 0,
     avgResponseTime: 0
   })
+  const [endpointHistory, setEndpointHistory] = useState(() => {
+    const saved = localStorage.getItem('endpointHistory')
+    return saved ? JSON.parse(saved) : {}
+  })
+  const [searchTerm, setSearchTerm] = useState('')
+  const [sortBy, setSortBy] = useState('name') // name, status, responseTime, successRate
 
   const checkEndpoint = async (endpoint) => {
     const startTime = Date.now()
@@ -441,6 +447,35 @@ function App() {
     return endpoints
   }
 
+  const updateEndpointHistory = (endpointKey, result) => {
+    setEndpointHistory(prev => {
+      const history = prev[endpointKey] || { checks: [], successRate: 100 }
+      const newChecks = [...history.checks, {
+        timestamp: result.lastChecked,
+        status: result.status,
+        responseTime: result.responseTime,
+        statusCode: result.statusCode,
+        error: result.error
+      }].slice(-20) // Keep last 20 checks
+
+      const successCount = newChecks.filter(c => c.status === 'healthy').length
+      const successRate = (successCount / newChecks.length) * 100
+
+      const updated = {
+        ...prev,
+        [endpointKey]: {
+          checks: newChecks,
+          successRate: Math.round(successRate),
+          lastError: result.error || history.lastError,
+          lastHealthy: result.status === 'healthy' ? result.lastChecked : history.lastHealthy
+        }
+      }
+
+      localStorage.setItem('endpointHistory', JSON.stringify(updated))
+      return updated
+    })
+  }
+
   const checkAllEndpoints = async (fullCheck = false) => {
     setLoading(true)
     const newStatus = {}
@@ -454,6 +489,9 @@ function App() {
       const key = `${endpoint.category}-${endpoint.path}`
       const status = await checkEndpoint(endpoint)
       newStatus[key] = status
+
+      // Update history
+      updateEndpointHistory(key, status)
 
       totalEndpoints++
       if (status.status === 'healthy') totalHealthy++
@@ -649,6 +687,15 @@ function App() {
             >
               Overview
             </button>
+            <button
+              className={`nav-item ${selectedCategory === 'All Endpoints' ? 'active' : ''}`}
+              onClick={() => setSelectedCategory('All Endpoints')}
+            >
+              All Endpoints
+              <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: '#86868b' }}>
+                {getTotalEndpoints()}
+              </span>
+            </button>
           </div>
 
           {Object.keys(ENDPOINTS).map(category => (
@@ -733,8 +780,157 @@ function App() {
           </>
         )}
 
+        {/* All Endpoints Table View */}
+        {selectedCategory === 'All Endpoints' && (
+          <div className="all-endpoints-section">
+            <div className="table-controls">
+              <input
+                type="text"
+                placeholder="Search endpoints..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="table-search"
+              />
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="table-sort">
+                <option value="name">Sort by Name</option>
+                <option value="status">Sort by Status</option>
+                <option value="responseTime">Sort by Response Time</option>
+                <option value="successRate">Sort by Success Rate</option>
+                <option value="category">Sort by Category</option>
+              </select>
+            </div>
+
+            <div className="endpoints-table-container">
+              <table className="endpoints-table">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Endpoint</th>
+                    <th>Method</th>
+                    <th>Category</th>
+                    <th>Response Time</th>
+                    <th>Success Rate</th>
+                    <th>Last Check</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    let allEndpoints = []
+                    Object.keys(ENDPOINTS).forEach(category => {
+                      ENDPOINTS[category].all.forEach(endpoint => {
+                        const key = `${category}-${endpoint.path}`
+                        const status = endpointStatus[key]
+                        const history = endpointHistory[key]
+
+                        allEndpoints.push({
+                          key,
+                          name: endpoint.name,
+                          path: endpoint.path,
+                          method: endpoint.method,
+                          category,
+                          status: status?.status || 'unknown',
+                          responseTime: status?.responseTime || 0,
+                          successRate: history?.successRate || 0,
+                          lastChecked: status?.lastChecked,
+                          error: status?.error
+                        })
+                      })
+                    })
+
+                    // Filter
+                    if (searchTerm) {
+                      allEndpoints = allEndpoints.filter(ep =>
+                        ep.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        ep.path.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                        ep.category.toLowerCase().includes(searchTerm.toLowerCase())
+                      )
+                    }
+
+                    // Sort
+                    allEndpoints.sort((a, b) => {
+                      switch (sortBy) {
+                        case 'name':
+                          return a.name.localeCompare(b.name)
+                        case 'status':
+                          return a.status === 'healthy' ? -1 : 1
+                        case 'responseTime':
+                          return b.responseTime - a.responseTime
+                        case 'successRate':
+                          return b.successRate - a.successRate
+                        case 'category':
+                          return a.category.localeCompare(b.category)
+                        default:
+                          return 0
+                      }
+                    })
+
+                    return allEndpoints.map(endpoint => (
+                      <tr key={endpoint.key} className={endpoint.status === 'unhealthy' ? 'unhealthy-row' : ''}>
+                        <td>
+                          <span className={`status-badge ${endpoint.status}`}>
+                            {endpoint.status === 'healthy' ? '✓' : endpoint.status === 'unhealthy' ? '✗' : '−'}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="endpoint-cell">
+                            <strong>{endpoint.name}</strong>
+                            <span className="endpoint-path-small">{endpoint.path}</span>
+                            {endpoint.error && (
+                              <span className="error-badge" title={endpoint.error}>
+                                {endpoint.error}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`method-badge ${endpoint.method.toLowerCase()}`}>
+                            {endpoint.method}
+                          </span>
+                        </td>
+                        <td>{endpoint.category}</td>
+                        <td>
+                          <span className={endpoint.responseTime > 1000 ? 'slow' : endpoint.responseTime > 500 ? 'medium' : 'fast'}>
+                            {endpoint.responseTime}ms
+                          </span>
+                        </td>
+                        <td>
+                          <div className="success-rate">
+                            <span className={endpoint.successRate >= 90 ? 'high' : endpoint.successRate >= 70 ? 'medium' : 'low'}>
+                              {endpoint.successRate}%
+                            </span>
+                            <div className="progress-bar">
+                              <div className="progress-fill" style={{ width: `${endpoint.successRate}%` }}></div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="last-check">
+                          {endpoint.lastChecked ? new Date(endpoint.lastChecked).toLocaleTimeString() : '−'}
+                        </td>
+                      </tr>
+                    ))
+                  })()}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="table-footer">
+              <p>Showing {(() => {
+                let count = 0
+                Object.keys(ENDPOINTS).forEach(cat => {
+                  count += ENDPOINTS[cat].all.length
+                })
+                return searchTerm ?
+                  `${allEndpoints.filter(ep =>
+                    ep.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                    ep.path.toLowerCase().includes(searchTerm.toLowerCase())
+                  ).length} of ${count}` : count
+              })()} endpoints</p>
+            </div>
+          </div>
+        )}
+
         {/* Endpoints List */}
-        {selectedCategory !== 'Overview' && ENDPOINTS[selectedCategory] && (
+        {selectedCategory !== 'Overview' && selectedCategory !== 'All Endpoints' && ENDPOINTS[selectedCategory] && (
           <div className="endpoints-section">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <h3>Endpoints</h3>
