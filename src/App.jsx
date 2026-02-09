@@ -2,247 +2,262 @@ import { useState, useEffect } from 'react'
 
 const API_BASE_URL = 'https://doc.usbooths.com'
 
+// Endpoints organizados por categoría
+const ENDPOINTS = {
+  'PUBLIC API': [
+    { name: 'API Health', path: '/api/health', method: 'GET' },
+    { name: 'Get Users', path: '/api/users', method: 'GET' },
+    { name: 'Get Products', path: '/api/products', method: 'GET' },
+    { name: 'Get Categories', path: '/api/categories', method: 'GET' },
+    { name: 'Get Galleries', path: '/api/galleries', method: 'GET' },
+  ],
+  'CLIENT/STORE': [
+    { name: 'Get Home Data', path: '/api/home', method: 'GET' },
+    { name: 'Get Cart', path: '/api/cart', method: 'GET' },
+    { name: 'Get Orders', path: '/api/orders', method: 'GET' },
+    { name: 'Get Quotes', path: '/api/quotes', method: 'GET' },
+  ],
+  'ADMIN PORTAL': [
+    { name: 'Dashboard Stats', path: '/api/admin/dashboard', method: 'GET' },
+    { name: 'Manage Users', path: '/api/admin/users', method: 'GET' },
+    { name: 'Manage Products', path: '/api/admin/products', method: 'GET' },
+    { name: 'Manage Orders', path: '/api/admin/orders', method: 'GET' },
+  ],
+  'CONTENT & CMS': [
+    { name: 'Get Content', path: '/api/content', method: 'GET' },
+    { name: 'Get Media', path: '/api/media', method: 'GET' },
+    { name: 'Get Pages', path: '/api/pages', method: 'GET' },
+  ]
+}
+
 function App() {
-  const [healthData, setHealthData] = useState(null)
+  const [endpointStatus, setEndpointStatus] = useState({})
   const [loading, setLoading] = useState(true)
   const [lastCheck, setLastCheck] = useState(new Date())
-  const [history, setHistory] = useState([])
+  const [selectedCategory, setSelectedCategory] = useState('PUBLIC API')
+  const [overallStats, setOverallStats] = useState({
+    total: 0,
+    healthy: 0,
+    unhealthy: 0,
+    avgResponseTime: 0
+  })
 
-  const checkHealth = async () => {
-    setLoading(true)
+  const checkEndpoint = async (endpoint) => {
+    const startTime = Date.now()
     try {
-      const startTime = Date.now()
-
-      // Check API health
-      const apiResponse = await fetch(`${API_BASE_URL}/api/health`, {
-        method: 'GET',
+      const response = await fetch(`${API_BASE_URL}${endpoint.path}`, {
+        method: endpoint.method,
         headers: { 'Accept': 'application/json' }
-      }).catch(() => ({ ok: false }))
+      })
 
-      const apiResponseTime = Date.now() - startTime
-      const apiStatus = apiResponse.ok ? 'healthy' : 'unhealthy'
+      const responseTime = Date.now() - startTime
 
-      // Check database connectivity (through a simple API endpoint)
-      const dbStartTime = Date.now()
-      const dbResponse = await fetch(`${API_BASE_URL}/api/users?limit=1`, {
-        method: 'GET',
-        headers: { 'Accept': 'application/json' }
-      }).catch(() => ({ ok: false }))
-
-      const dbResponseTime = Date.now() - dbStartTime
-      const dbStatus = dbResponse.ok ? 'healthy' : 'unhealthy'
-
-      const overallStatus = apiStatus === 'healthy' && dbStatus === 'healthy' ? 'healthy' : 'degraded'
-
-      const newHealthData = {
-        status: overallStatus,
-        timestamp: new Date().toISOString(),
-        services: {
-          api: {
-            status: apiStatus,
-            responseTime: apiResponseTime,
-            endpoint: `${API_BASE_URL}/api/health`
-          },
-          database: {
-            status: dbStatus,
-            responseTime: dbResponseTime,
-            endpoint: `${API_BASE_URL}/api/users`
-          }
-        },
-        uptime: calculateUptime()
+      return {
+        status: response.ok ? 'healthy' : 'unhealthy',
+        responseTime,
+        statusCode: response.status,
+        lastChecked: new Date().toISOString()
       }
-
-      setHealthData(newHealthData)
-
-      // Add to history (keep last 20 checks)
-      setHistory(prev => {
-        const newHistory = [{
-          timestamp: new Date().toISOString(),
-          status: overallStatus
-        }, ...prev]
-        return newHistory.slice(0, 20)
-      })
-
     } catch (error) {
-      console.error('Health check failed:', error)
-      setHealthData({
+      return {
         status: 'unhealthy',
-        timestamp: new Date().toISOString(),
+        responseTime: Date.now() - startTime,
+        statusCode: 0,
         error: error.message,
-        services: {}
-      })
-    } finally {
-      setLoading(false)
-      setLastCheck(new Date())
+        lastChecked: new Date().toISOString()
+      }
     }
   }
 
-  const calculateUptime = () => {
-    // Calculate uptime percentage from history
-    if (history.length === 0) return 100
-    const healthyChecks = history.filter(h => h.status === 'healthy').length
-    return ((healthyChecks / history.length) * 100).toFixed(2)
+  const checkAllEndpoints = async () => {
+    setLoading(true)
+    const newStatus = {}
+    let totalHealthy = 0
+    let totalEndpoints = 0
+    let totalResponseTime = 0
+
+    for (const category of Object.keys(ENDPOINTS)) {
+      for (const endpoint of ENDPOINTS[category]) {
+        const key = `${category}-${endpoint.path}`
+        const status = await checkEndpoint(endpoint)
+        newStatus[key] = status
+
+        totalEndpoints++
+        if (status.status === 'healthy') totalHealthy++
+        totalResponseTime += status.responseTime
+      }
+    }
+
+    setEndpointStatus(newStatus)
+    setOverallStats({
+      total: totalEndpoints,
+      healthy: totalHealthy,
+      unhealthy: totalEndpoints - totalHealthy,
+      avgResponseTime: Math.round(totalResponseTime / totalEndpoints)
+    })
+    setLoading(false)
+    setLastCheck(new Date())
   }
 
   useEffect(() => {
-    checkHealth()
+    checkAllEndpoints()
 
-    // Auto-refresh every 30 seconds
+    // Auto-refresh every 60 seconds
     const interval = setInterval(() => {
-      checkHealth()
-    }, 30000)
+      checkAllEndpoints()
+    }, 60000)
 
     return () => clearInterval(interval)
   }, [])
 
   const getStatusColor = (status) => {
-    switch(status) {
-      case 'healthy': return '#10b981'
-      case 'degraded': return '#f59e0b'
-      case 'unhealthy': return '#ef4444'
-      default: return '#6b7280'
-    }
+    return status === 'healthy' ? '#10b981' : '#ef4444'
   }
 
   const getStatusIcon = (status) => {
-    switch(status) {
-      case 'healthy': return '✓'
-      case 'degraded': return '⚠'
-      case 'unhealthy': return '✗'
-      default: return '?'
-    }
-  }
-
-  if (loading && !healthData) {
-    return (
-      <div className="container">
-        <div className="loading">
-          <div className="spinner"></div>
-          <p>Checking API health...</p>
-        </div>
-      </div>
-    )
+    return status === 'healthy' ? '✓' : '✗'
   }
 
   return (
-    <div className="container">
-      <header className="header">
-        <h1>🏥 US Booths API Health Monitor</h1>
-        <p className="subtitle">Real-time API status and monitoring</p>
-      </header>
-
-      {/* Overall Status */}
-      <div className="status-card main-status" style={{ borderLeft: `4px solid ${getStatusColor(healthData?.status)}` }}>
-        <div className="status-header">
-          <h2>System Status</h2>
-          <span className={`status-badge ${healthData?.status}`}>
-            {getStatusIcon(healthData?.status)} {healthData?.status?.toUpperCase()}
-          </span>
+    <div className="app-container">
+      {/* Sidebar */}
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <h1>US Booths API</h1>
+          <p className="version">Health Monitor — v1.0</p>
         </div>
-        <div className="status-details">
-          <div className="detail-item">
-            <span className="label">Last Check:</span>
-            <span className="value">{lastCheck.toLocaleTimeString()}</span>
-          </div>
-          <div className="detail-item">
-            <span className="label">Uptime (Last 20 checks):</span>
-            <span className="value">{calculateUptime()}%</span>
-          </div>
-          <div className="detail-item">
-            <span className="label">Timestamp:</span>
-            <span className="value">{new Date(healthData?.timestamp).toLocaleString()}</span>
-          </div>
+
+        <div className="sidebar-search">
+          <input type="text" placeholder="Search endpoints..." />
         </div>
-        <button onClick={checkHealth} className="refresh-button" disabled={loading}>
-          {loading ? '🔄 Checking...' : '🔄 Refresh Now'}
-        </button>
-      </div>
 
-      {/* Services Grid */}
-      <div className="services-grid">
-        {healthData?.services && Object.entries(healthData.services).map(([serviceName, service]) => (
-          <div key={serviceName} className="service-card" style={{ borderLeft: `4px solid ${getStatusColor(service.status)}` }}>
-            <div className="service-header">
-              <h3>{serviceName.charAt(0).toUpperCase() + serviceName.slice(1)}</h3>
-              <span className={`status-badge ${service.status}`}>
-                {getStatusIcon(service.status)}
-              </span>
-            </div>
-            <div className="service-details">
-              <div className="detail-row">
-                <span className="label">Status:</span>
-                <span className={`value ${service.status}`}>{service.status}</span>
-              </div>
-              <div className="detail-row">
-                <span className="label">Response Time:</span>
-                <span className="value">{service.responseTime}ms</span>
-              </div>
-              {service.endpoint && (
-                <div className="detail-row">
-                  <span className="label">Endpoint:</span>
-                  <span className="value endpoint">{service.endpoint}</span>
-                </div>
-              )}
-            </div>
+        <nav className="sidebar-nav">
+          <div className="nav-section">
+            <div className="nav-label">GENERAL</div>
+            <button
+              className={`nav-item ${selectedCategory === 'Overview' ? 'active' : ''}`}
+              onClick={() => setSelectedCategory('Overview')}
+            >
+              Overview
+            </button>
           </div>
-        ))}
-      </div>
 
-      {/* History Timeline */}
-      <div className="history-section">
-        <h2>Recent Checks</h2>
-        <div className="timeline">
-          {history.map((check, index) => (
-            <div key={index} className="timeline-item">
-              <div
-                className="timeline-dot"
-                style={{ backgroundColor: getStatusColor(check.status) }}
-                title={`${check.status} - ${new Date(check.timestamp).toLocaleString()}`}
-              ></div>
+          {Object.keys(ENDPOINTS).map(category => (
+            <div key={category} className="nav-section">
+              <div className="nav-label">{category}</div>
+              <button
+                className={`nav-item ${selectedCategory === category ? 'active' : ''}`}
+                onClick={() => setSelectedCategory(category)}
+              >
+                {category}
+              </button>
             </div>
           ))}
-        </div>
-        <div className="timeline-legend">
-          <div className="legend-item">
-            <div className="legend-dot" style={{ backgroundColor: '#10b981' }}></div>
-            <span>Healthy</span>
-          </div>
-          <div className="legend-item">
-            <div className="legend-dot" style={{ backgroundColor: '#f59e0b' }}></div>
-            <span>Degraded</span>
-          </div>
-          <div className="legend-item">
-            <div className="legend-dot" style={{ backgroundColor: '#ef4444' }}></div>
-            <span>Unhealthy</span>
-          </div>
-        </div>
-      </div>
+        </nav>
+      </aside>
 
-      {/* API Information */}
-      <div className="info-section">
-        <h2>API Information</h2>
-        <div className="info-grid">
-          <div className="info-card">
-            <h3>📍 Base URL</h3>
-            <code>{API_BASE_URL}</code>
+      {/* Main Content */}
+      <main className="main-content">
+        <div className="content-header">
+          <h2>{selectedCategory}</h2>
+          <button onClick={checkAllEndpoints} className="refresh-btn" disabled={loading}>
+            {loading ? '🔄 Checking...' : '🔄 Refresh'}
+          </button>
+        </div>
+
+        {/* Stats Cards */}
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-value">{overallStats.total}</div>
+            <div className="stat-label">Total Endpoints</div>
           </div>
-          <div className="info-card">
-            <h3>📚 Documentation</h3>
-            <a href={API_BASE_URL} target="_blank" rel="noopener noreferrer">
-              View API Docs
-            </a>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: '#10b981' }}>{overallStats.healthy}</div>
+            <div className="stat-label">Healthy</div>
           </div>
-          <div className="info-card">
-            <h3>🔄 Auto-Refresh</h3>
-            <p>Every 30 seconds</p>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: '#ef4444' }}>{overallStats.unhealthy}</div>
+            <div className="stat-label">Unhealthy</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value">{overallStats.avgResponseTime}ms</div>
+            <div className="stat-label">Avg Response</div>
           </div>
         </div>
-      </div>
 
-      <footer className="footer">
-        <p>US Booths Health Monitor • Auto-refreshing every 30 seconds</p>
-        <p className="footer-note">Monitoring {Object.keys(healthData?.services || {}).length} services</p>
-      </footer>
+        {/* Base URL Section */}
+        {selectedCategory === 'Overview' && (
+          <>
+            <div className="base-url-section">
+              <h3>Base URL</h3>
+              <div className="url-info">
+                <div><strong>API Base:</strong> <span className="url">{API_BASE_URL}</span></div>
+                <div><strong>Version:</strong> <span className="url">/api/v1/...</span></div>
+              </div>
+            </div>
+
+            <div className="api-stats-section">
+              <h3>API Statistics</h3>
+              <ul>
+                <li><strong>Public Endpoints:</strong> {ENDPOINTS['PUBLIC API'].length} endpoints (no authentication required)</li>
+                <li><strong>Client/Store Endpoints:</strong> {ENDPOINTS['CLIENT/STORE'].length} endpoints (public store, mixed auth)</li>
+                <li><strong>Admin Endpoints:</strong> {ENDPOINTS['ADMIN PORTAL'].length} endpoints (authentication required)</li>
+                <li><strong>Content Endpoints:</strong> {ENDPOINTS['CONTENT & CMS'].length} endpoints (CMS integration)</li>
+              </ul>
+            </div>
+
+            <div className="last-check-section">
+              <p>Last Check: {lastCheck.toLocaleString()}</p>
+              <p>Auto-refresh: Every 60 seconds</p>
+            </div>
+          </>
+        )}
+
+        {/* Endpoints List */}
+        {selectedCategory !== 'Overview' && (
+          <div className="endpoints-section">
+            <h3>Endpoints</h3>
+            <div className="endpoints-list">
+              {ENDPOINTS[selectedCategory]?.map((endpoint) => {
+                const key = `${selectedCategory}-${endpoint.path}`
+                const status = endpointStatus[key]
+
+                return (
+                  <div key={key} className="endpoint-card">
+                    <div className="endpoint-header">
+                      <div className="endpoint-method">{endpoint.method}</div>
+                      <div className="endpoint-name">{endpoint.name}</div>
+                      {status && (
+                        <div
+                          className={`endpoint-status ${status.status}`}
+                          style={{ color: getStatusColor(status.status) }}
+                        >
+                          {getStatusIcon(status.status)} {status.status}
+                        </div>
+                      )}
+                    </div>
+                    <div className="endpoint-path">{endpoint.path}</div>
+                    {status && (
+                      <div className="endpoint-metrics">
+                        <span>Response: {status.responseTime}ms</span>
+                        <span>Status Code: {status.statusCode || 'N/A'}</span>
+                        <span className="endpoint-time">
+                          Last checked: {new Date(status.lastChecked).toLocaleTimeString()}
+                        </span>
+                      </div>
+                    )}
+                    {status?.error && (
+                      <div className="endpoint-error">
+                        Error: {status.error}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </main>
     </div>
   )
 }
