@@ -392,6 +392,10 @@ function App() {
   const [expandedCategories, setExpandedCategories] = useState({})
   const [showAllEndpoints, setShowAllEndpoints] = useState(false)
   const [lastDailyCheck, setLastDailyCheck] = useState(null)
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem('darkMode')
+    return saved ? JSON.parse(saved) : false
+  })
   const [overallStats, setOverallStats] = useState({
     total: 0,
     healthy: 0,
@@ -586,6 +590,16 @@ function App() {
     return () => clearInterval(interval)
   }, [])
 
+  useEffect(() => {
+    // Aplicar tema al body
+    document.body.classList.toggle('dark-mode', darkMode)
+    localStorage.setItem('darkMode', JSON.stringify(darkMode))
+  }, [darkMode])
+
+  const toggleTheme = () => {
+    setDarkMode(prev => !prev)
+  }
+
   const getStatusColor = (status) => {
     return status === 'healthy' ? '#34c759' : '#ff3b30'
   }
@@ -658,9 +672,14 @@ function App() {
       <main className="main-content">
         <div className="content-header">
           <h2>{selectedCategory}</h2>
-          <button onClick={() => checkAllEndpoints(false)} className="refresh-btn" disabled={loading}>
-            {loading ? '🔄 Checking...' : '🔄 Refresh'}
-          </button>
+          <div className="header-actions">
+            <button onClick={toggleTheme} className="theme-btn" title={darkMode ? 'Tema Claro' : 'Tema Oscuro'}>
+              {darkMode ? '☀️' : '🌙'}
+            </button>
+            <button onClick={() => checkAllEndpoints(false)} className="refresh-btn" disabled={loading}>
+              {loading ? '🔄 Checking...' : '🔄 Refresh'}
+            </button>
+          </div>
         </div>
 
         {/* Stats Cards */}
